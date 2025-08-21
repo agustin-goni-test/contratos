@@ -50,6 +50,10 @@ class FileCompare():
                 return data.encode("utf-8")
             
     def pdf_to_text(self, file_bytes):
+        ''' 
+        Convertir un archivo PDF (en stream de bytes) a una representación de texto.
+        Recibe file_bytes y devuelve text.
+        '''
         reader = PdfReader(BytesIO(file_bytes))
         text = ""
         for page in reader.pages:
@@ -58,13 +62,29 @@ class FileCompare():
     
 
     def similarity_text(self, a_bytes, b_bytes):
+        '''
+        Calcular la similitud de dos archivos representados como streams de bytes.
+        De acuerdo al uso pensado, uno de los archivos es el ejemplo de comparación,
+        y el otro es el archivo que estamos comparando.
+        '''
+        # Convertir los streams de bytes a texto
         text_a = self.pdf_to_text(a_bytes)
         text_b = self.pdf_to_text(b_bytes)
+        
         # return difflib.SequenceMatcher(None, text_a, text_b).ratio()
+        # Calcular similitud a través de embeddings.
         return self.embedding_similarity(text_a, text_b)
     
 
     def token_jaccard_similarity(self, text1, text2):
+        '''
+        Implementa una comparación de los textos a través de similaridad Jaccard,
+        a través de tokens.
+
+        Para esto separa ambos textos en tokens y genera conjuntos con ellos.
+        Luego calcula la instersección de ambos conjuntos y su unión, y compara las
+        longitudes de ambos para calcular un coeficiente.
+        '''
         tokens1 = set(text1.split())
         tokens2 = set(text2.split())
         return len(tokens1 & tokens2) / len(tokens1 | tokens2)
@@ -90,8 +110,12 @@ class FileCompare():
         return difflib.SequenceMatcher(None, a_text, b_text).ratio()
     
     def compare_to_example(self, bytes, sample_size=5000):
+
+        # Calcular el coeficioente de similutd
         ratio = self.similarity_text(self.file_in_bytes, bytes)
         print(f"Similarity ratio: {ratio}")
+        
+        # Retonar coeficiente
         return ratio
     
 

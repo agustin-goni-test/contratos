@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 import json
 from compare import get_instance
 
+compare_instance = get_instance()
+
 # Método para validar si existe el contrato de un comercio particular.
 # En este caso el "endpoint" corresponde al de creación de contrato T2P.
 # Lo podemos cambiar al de POS pasando datos diferentes al método
@@ -30,9 +32,15 @@ def check_contract(comercio_id, endpoint, headers):
         # return any(doc.get("nombreDocumento") == "CONTRATOS" for doc in data)
         for doc in data:
             if doc.get("nombreDocumento") == "CONTRATOS":
-                json_payload = json.dumps(doc)
-                return validate_contract_file(comercio_id, endpoint, headers, json_payload)
+                return True
         return False
+        
+        
+        # for doc in data:
+        #     if doc.get("nombreDocumento") == "CONTRATOS":
+        #         json_payload = json.dumps(doc)
+        #         return validate_contract_file(comercio_id, endpoint, headers, json_payload)
+        # return False
     
     # Si hay una excepción, retorna False
     except (ValueError, TypeError):
@@ -55,45 +63,124 @@ def double_check_contract(comercio_id, endpoint, headers):
 
 
 def validate_contract_file(comercio_id, endpoint, headers, payload):
+    '''
+    Validate if contract exists (as file) and if it has a high similarity with
+    a model contract (which implies it is, in fact, a contract)
+    '''
     print(f"Validando si existe el archivo de contrato para comercio {comercio_id}...")
 
-    compare_instance = get_instance()
+    try: 
+        # Obtener instancia de comparador
+        # compare_instance = get_instance()
 
-    endpoint_comercio = endpoint+comercio_id
+        # Definir endpoint para obtener archivo
+        endpoint_comercio = endpoint+comercio_id
 
-    # Ensure headers include Content-Type
-    headers = headers.copy()
-    headers["Content-Type"] = "application/json"
-  
+        # Ensure headers include Content-Type
+        headers = headers.copy()
+        headers["Content-Type"] = "application/json"
+        
+        # Llamar servicio y ver si es exitoso
+        response = requests.post(endpoint_comercio, data=payload, headers=headers)
+        response.raise_for_status()
+        
+        # Si respondió correctamente
+        if response.status_code == 200:
 
-    response = requests.post(endpoint_comercio, data=payload, headers=headers)
-    response.raise_for_status()
-    if response.status_code == 200:
-        file = compare_instance.load_file_or_text(response.content, from_file=False, decode_base64=False)
-        compare_instance.compare_to_example(file)
-        return True
-    else:
+            # Check if this is actually an error message in JSON format
+            content_type = response.headers.get('Content-Type', '').lower()
+            content_start = response.content[:100].decode('utf-8', errors='ignore')
+            
+            # Detect JSON error responses (common patterns)
+            is_json_error = (
+                'application/json' in content_type or
+                content_start.strip().startswith('{') or
+                '"message":' in content_start or
+                '"status_code":' in content_start
+            )
+            
+            if is_json_error:
+                try:
+                    error_data = response.json()
+                    error_message = error_data.get('message', 'Archivo no encontrado')
+                    print(f"El servicio reportó error: {error_message}")
+                    return (0.0, False)
+                except ValueError:
+                    print("El servicio respondió con contenido inesperado (posible error)")
+                    return (0.0, False)
+            
+            # Cargar el archivo para instancia de comparación
+            try:
+                file = compare_instance.load_file_or_text(
+                    response.content,
+                    from_file=False,
+                    decode_base64=False
+                    )
+                
+                # Comparar al ejemplo
+                ratio = compare_instance.compare_to_example(file)
+                
+                # Retornar el coeficiente y verdadero
+                return (ratio, True)
+            
+            except:
+                print(f"Error procesando el archivo: {e}")
+                return (0.0, False)
+        
+        else:
+            return (0.0, False)
+        
+    except requests.exceptions.RequestException as e:
+        print(f"Error en la solicitud HTTP: {e}")
+        return (0.0, False)
+    except Exception as e:
+        print(f"Error inesperado: {e}")
+        return (0.0, False)
+
+    
+def compare_contract_file_to_example(comercio_id, endpoint, headers):
+
+    # compare_instance = get_instance()
+    
+    # endpoint_comercio = endpoint+comercio_id
+
+    # # Ensure headers include Content-Type
+    # headers = headers.copy()
+    # headers["Content-Type"] = "application/json"
+
+    # response = requests.post(endpoint_comercio, data=payload, headers=headers)
+    # response.raise_for_status()
+    # if response.status_code == 200:
+    #     file = compare_instance.load_file_or_text(response.content, from_file=False, decode_base64=False)
+    #     ratio = compare_instance.compare_to_example(file)
+    #     return ratio, True
+    # else:
+    #     return 0.0, False
+
+    response = requests.get(f"{endpoint}/{comercio_id}", headers=headers)
+    
+    # Si el servicio retorna una respuesta de éxito
+    if response.status_code != 200:
         return False
     
-def compare_contract_file_to_example(comercio_id, endpoint, headers, payload):
-
-    compare_instance = get_instance()
+    try:
+        # Recuperar los datos de la llamada
+        data = response.json()
+        
+        # Si en la lista de documentos existente hay alguno que se identifique como
+        # "CONTRATOS" quiere decir que ya hay un contrato registrado. El método
+        # retorna True. De lo contrario el False
+        # return any(doc.get("nombreDocumento") == "CONTRATOS" for doc in data)
+        for doc in data:
+            if doc.get("nombreDocumento") == "CONTRATOS":
+                json_payload = json.dumps(doc)
+                ratio, is_valid = validate_contract_file(comercio_id, endpoint, headers, json_payload)
+                return (ratio, is_valid)
+        return (0.0, False)
     
-    endpoint_comercio = endpoint+comercio_id
-
-    # Ensure headers include Content-Type
-    headers = headers.copy()
-    headers["Content-Type"] = "application/json"
-
-    response = requests.post(endpoint_comercio, data=payload, headers=headers)
-    response.raise_for_status()
-    if response.status_code == 200:
-        file = compare_instance.load_file_or_text(response.content, from_file=False, decode_base64=False)
-        ratio = compare_instance.compare_to_example(file)
-        return ratio, True
-    else:
-        return 0.0, False
-
+    # Si hay una excepción, retorna False
+    except (ValueError, TypeError):
+        return False
 
 
 
@@ -134,10 +221,23 @@ def process_block(df, start, end, endpoint_1, endpoint_2, headers_1, headers_2, 
             # Crear el contrato y revisar que quedó OK. Informar éxito o fracaso
             if create_contract(comercio_id, endpoint_2, headers_2):
                 if double_check_contract(comercio_id, endpoint_1, headers_1):
-                    df.loc[index, "Contrato"] = "Si"
-                    print("reparado correctamente")
-                    log_entries[-1] += " reparación exitosa"
-                    repairs_successful += 1
+
+                    # Validar el archivo
+                    ratio, is_valid = compare_contract_file_to_example(comercio_id, endpoint_1, headers_1)
+                    df.loc[index, "Similitud"] = ratio
+                    
+                    if is_valid:
+                        # Marcar el contrato como existente
+                        df.loc[index, "Contrato"] = "Si"
+                        print("reparado correctamente")
+                        log_entries[-1] += " reparación exitosa"
+                        repairs_successful += 1
+                    else:
+                        df.loc[index, "Contrato"] = "No"
+                        print("la reparación falló")
+                        log_entries[-1] += " reparación sin éxito"
+
+                
                 else:
                     print("la reparación falló")
                     log_entries[-1] += " reparación sin éxito"
@@ -147,10 +247,20 @@ def process_block(df, start, end, endpoint_1, endpoint_2, headers_1, headers_2, 
 
         # Si el contrato ya existía, o sea, estaba mal clasificado, informar y actualizar estado en la fila
         else:
-            df.loc[index, "Contrato"] = "Si"
-            mistyped_cases += 1
-            print("contrato ya está registrado en los sistemas")
-            log_entries.append(f"El contrato del comercio {comercio_id} ya estaba guardado en los sistemas... OK!")
+            # Validar el archivo
+            ratio, is_valid = compare_contract_file_to_example(comercio_id, endpoint_1, headers_1)
+            df.loc[index, "Similitud"] = ratio
+
+            if is_valid:
+                df.loc[index, "Contrato"] = "Si"
+                mistyped_cases += 1
+                print("contrato ya está registrado en los sistemas")
+                log_entries.append(f"El contrato del comercio {comercio_id} ya estaba guardado en los sistemas... OK!")
+
+            else:
+                df.loc[index, "Contrato"] = "No"
+                print(f"Error al descargar archivo para comercio {comercio_id}")
+                log_entries[-1] += f" Error al descargar archivo para comercio {comercio_id}"
     
     # Si a lo largo del bloque no hubo reparaciónes ni casos mal registrados, informar
     if repairs_attempted == 0 and mistyped_cases == 0:
@@ -167,7 +277,7 @@ def process_block(df, start, end, endpoint_1, endpoint_2, headers_1, headers_2, 
     
     return repairs_attempted, repairs_successful, mistyped_cases
 
-def main_backup():
+def main():
 
     # Cargar valores de ambiente para configuración
     load_dotenv()
@@ -181,7 +291,7 @@ def main_backup():
     BLOCK_SIZE = int(os.getenv("BLOCK_SIZE"))
 
     # Permite al usuario generar un tamaño de bloque personalizado
-    block = input("Definir el tamaño del bloque a analizar (default: 50): ")
+    block = input(f"Definir el tamaño del bloque a analizar (default: {BLOCK_SIZE}): ")
     if block:
         BLOCK_SIZE = int(block)
 
@@ -259,7 +369,7 @@ def main_backup():
     print(f"Bloques totales: {total_blocks}, Total filas analizadas: {total_cases}, Total intentos de reparación: {total_attempts}, Total reparaciones exitosas: {total_successful}, Total de casos mal clasificados: {total_mistypes}")
 
 
-def main():
+def main_test():
     
     load_dotenv()
     
